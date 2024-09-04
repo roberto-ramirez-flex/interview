@@ -1,0 +1,4 @@
+---
+- name: Reboot server if needed
+  ansible.builtin.reboot:
+  become: true
