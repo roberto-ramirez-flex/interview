@@ -1,4 +1,116 @@
 ---
-- name: Reboot server if needed
-  ansible.builtin.reboot:
+- name: Add Docker's official GPG key
   become: true
+  ansible.builtin.apt:
+    name: "{{ item }}"
+    state: present
+  with_items:
+    - ca-certificates
+    - curl
+
+- name: Install directory for apt keyrings
+  become: true
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: '0755'
+
+- name: Download Docker's GPG key
+  become: true
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    dest: /etc/apt/keyrings/docker.asc
+    mode: '0644'
+
+- name: Set permissions for Docker GPG key
+  become: true
+  ansible.builtin.file:
+    path: /etc/apt/keyrings/docker.asc
+    mode: '0644'
+
+- name: Add Docker repository to Apt sources
+  become: true
+  ansible.builtin.apt_repository:
+    repo: >
+      deb [arch={{ architecture }} signed-by=/etc/apt/keyrings/docker.asc]
+      https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable
+    state: present
+  register: docker_repo
+
+- name: Print specific server facts
+  ansible.builtin.debug:
+    msg:
+      - "Hostname: {{ ansible_hostname }}"
+      - "OS: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+      - "IP Address: {{ ansible_default_ipv4.address }}"
+      - "Architecture: {{ ansible_architecture }}"
+      - "Processor: {{ ansible_processor[1] }}"
+      - "Total Memory: {{ ansible_memtotal_mb }} MB"
+
+- name: Update Apt cache if Docker repository was added
+  become: true
+  ansible.builtin.apt:
+    update_cache: true
+
+- name: Install Docker packages
+  become: true
+  ansible.builtin.apt:
+    name: "{{ docker_packages }}"
+    state: present
+
+- name: Add user bobby to docker group
+  become: true
+  ansible.builtin.user:
+    name: bobby
+    groups: docker
+    append: true
+
+- name: Check if Docker volume portainer_data exists
+  community.docker.docker_volume_info:
+    name: portainer_data
+  register: volume_info
+
+- name: Check if volume exists
+  ansible.builtin.debug:
+    msg: "The volume portainer_data {{ 'exists' if volume_info.exists else 'does not exist' }}"
+
+- name: Print volume info if it exists
+  ansible.builtin.debug:
+    var: volume_info
+
+- name: Create volume if it doesn't exist
+  community.docker.docker_volume:
+    name: portainer_data
+    state: present
+  when: not volume_info.exists
+
+- name: Check if Portainer container exists
+  become: true
+  community.docker.docker_container_info:
+    name: portainer
+  register: portainer_container_info
+
+- name: Debug Portainer container info
+  ansible.builtin.debug:
+    var: portainer_container_info
+
+- name: Create Portainer container if it doesn't exist
+  community.docker.docker_container:
+    name: portainer
+    image: portainer/portainer-ce:latest
+    restart_policy: always
+    state: started
+    ports:
+      - "8000:8000"
+      - "9443:9443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+  when: not portainer_container_info.exists
+
+- name: Wait for Portainer container to stabilize
+  become: true
+  ansible.builtin.wait_for:
+    port: 8000
+    delay: 10
+    timeout: 60
