@@ -66,8 +66,6 @@ resource "aws_volume_attachment" "ebs_att" {
   instance_id = aws_instance.vm1.id
 }
 
-
-## * This section will print the ip address of the virtual machine
 output "vm1_private_ip_address" {
   value = aws_instance.vm1.private_ip
 }
